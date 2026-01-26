@@ -521,7 +521,7 @@ test("updates config and writes to file", async () => {
       const newConfig = { model: "updated/model" }
       await Config.update(newConfig as any)
 
-      const writtenConfig = JSON.parse(await Bun.file(path.join(tmp.path, "config.json")).text())
+      const writtenConfig = JSON.parse(await Bun.file(path.join(tmp.path, "opencode.json")).text())
       expect(writtenConfig.model).toBe("updated/model")
     },
   })
@@ -632,6 +632,62 @@ test("merges plugin arrays from global and local configs", async () => {
       // Should have all 3 plugins (not replaced, but merged)
       const pluginNames = plugins.filter((p) => p.includes("global-plugin") || p.includes("local-plugin"))
       expect(pluginNames.length).toBeGreaterThanOrEqual(3)
+    },
+  })
+})
+
+test("disabled plugins override lower precedence configs", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      const projectDir = path.join(dir, "project")
+      const opencodeDir = path.join(projectDir, ".opencode")
+      await fs.mkdir(opencodeDir, { recursive: true })
+
+      await Bun.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          disabled_plugins: ["global-plugin", "shared-plugin"],
+        }),
+      )
+
+      await Bun.write(
+        path.join(opencodeDir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          disabled_plugins: ["shared-plugin"],
+        }),
+      )
+    },
+  })
+
+  await Instance.provide({
+    directory: path.join(tmp.path, "project"),
+    fn: async () => {
+      const config = await Config.get()
+      expect(config.disabled_plugins).toEqual(["shared-plugin"])
+    },
+  })
+})
+
+test("normalizes disabled plugin names", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          disabled_plugins: ["my-plugin@1.0.0", "file:///tmp/other-plugin.ts", "my-plugin@2.0.0"],
+        }),
+      )
+    },
+  })
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await Config.get()
+      expect(config.disabled_plugins).toEqual(["my-plugin", "other-plugin"])
     },
   })
 })

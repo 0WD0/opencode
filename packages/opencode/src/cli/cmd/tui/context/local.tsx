@@ -33,12 +33,25 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }
     }
 
+    function normalizePluginName(plugin: string) {
+      if (plugin.startsWith("file://")) {
+        try {
+          return path.parse(new URL(plugin).pathname).name
+        } catch {
+          return plugin
+        }
+      }
+      const lastAt = plugin.lastIndexOf("@")
+      if (lastAt > 0) return plugin.substring(0, lastAt)
+      return plugin
+    }
+
     const agent = iife(() => {
       const agents = createMemo(() => sync.data.agent.filter((x) => x.mode !== "subagent" && !x.hidden))
       const [agentStore, setAgentStore] = createStore<{
         current: string
       }>({
-        current: agents()[0].name,
+        current: agents()[0]?.name ?? "build",
       })
       const { theme } = useTheme()
       const colors = createMemo(() => [
@@ -54,7 +67,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           return agents()
         },
         current() {
-          return agents().find((x) => x.name === agentStore.current)!
+          const list = agents()
+          if (!list.length) {
+            return {
+              name: agentStore.current || "build",
+              mode: "primary",
+              permission: [],
+              options: {},
+            } as (typeof list)[number]
+          }
+          const match = list.find((x) => x.name === agentStore.current)
+          if (match) return match
+          const fallback = list[0]
+          if (fallback && fallback.name !== agentStore.current) {
+            setAgentStore("current", fallback.name)
+          }
+          return fallback
         },
         set(name: string) {
           if (!agents().some((x) => x.name === name))
@@ -67,10 +95,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         },
         move(direction: 1 | -1) {
           batch(() => {
-            let next = agents().findIndex((x) => x.name === agentStore.current) + direction
-            if (next < 0) next = agents().length - 1
-            if (next >= agents().length) next = 0
-            const value = agents()[next]
+            const list = agents()
+            if (!list.length) return
+            let next = list.findIndex((x) => x.name === agentStore.current) + direction
+            if (next < 0) next = list.length - 1
+            if (next >= list.length) next = 0
+            const value = list[next]
             setAgentStore("current", value.name)
           })
         },
@@ -374,6 +404,40 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
+    const plugin = {
+      list() {
+        return sync.data.config.plugin ?? []
+      },
+      name(specifier: string) {
+        return normalizePluginName(specifier)
+      },
+      isEnabled(specifierOrName: string) {
+        const name = normalizePluginName(specifierOrName)
+        const disabled = new Set(sync.data.config.disabled_plugins ?? [])
+        return !disabled.has(name)
+      },
+      async toggle(specifierOrName: string) {
+        const name = normalizePluginName(specifierOrName)
+        const disabled = new Set(sync.data.config.disabled_plugins ?? [])
+        const prev = [...disabled]
+
+        if (disabled.has(name)) disabled.delete(name)
+        else disabled.add(name)
+
+        const next = [...disabled]
+        sync.set("config", "disabled_plugins", next)
+
+        try {
+          await sdk.client.config.update({ config: { disabled_plugins: next } })
+        } catch (error) {
+          sync.set("config", "disabled_plugins", prev)
+          const message = error instanceof Error ? error.message : String(error)
+          toast.show({ variant: "error", message: `Failed to toggle plugin ${name}: ${message}`, duration: 3000 })
+          throw error
+        }
+      },
+    }
+
     // Automatically update model when agent changes
     createEffect(() => {
       const value = agent.current()
@@ -396,6 +460,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       model,
       agent,
       mcp,
+      plugin,
     }
     return result
   },

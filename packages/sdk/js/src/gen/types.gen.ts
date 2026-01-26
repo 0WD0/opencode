@@ -1224,6 +1224,10 @@ export type Config = {
     ignore?: Array<string>
   }
   plugin?: Array<string>
+  /**
+   * Disable plugins by name (canonical, without version/path).
+   */
+  disabled_plugins?: Array<string>
   snapshot?: boolean
   /**
    * Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing

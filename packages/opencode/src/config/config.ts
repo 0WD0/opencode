@@ -98,6 +98,7 @@ export namespace Config {
     result.agent = result.agent || {}
     result.mode = result.mode || {}
     result.plugin = result.plugin || []
+    result.disabled_plugins = result.disabled_plugins || []
 
     const directories = [
       Global.Path.config,
@@ -194,6 +195,7 @@ export namespace Config {
     }
 
     result.plugin = deduplicatePlugins(result.plugin ?? [])
+    result.disabled_plugins = unique((result.disabled_plugins ?? []).map(getPluginName))
 
     return {
       config: result,
@@ -900,6 +902,10 @@ export namespace Config {
         })
         .optional(),
       plugin: z.string().array().optional(),
+      disabled_plugins: z
+        .array(z.string())
+        .optional()
+        .describe("Disable plugins by name (canonical, without version/path)."),
       snapshot: z.boolean().optional(),
       share: z
         .enum(["manual", "auto", "disabled"])
@@ -1263,10 +1269,39 @@ export namespace Config {
     return global()
   }
 
+  async function projectConfigFile() {
+    if (Flag.OPENCODE_CONFIG) return Flag.OPENCODE_CONFIG
+
+    if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+      const json = await Filesystem.findUp("opencode.json", Instance.directory, Instance.worktree)
+      if (json.length) return json[0]
+
+      const jsonc = await Filesystem.findUp("opencode.jsonc", Instance.directory, Instance.worktree)
+      if (jsonc.length) return jsonc[0]
+    }
+
+    return path.join(Instance.directory, "opencode.json")
+  }
+
   export async function update(config: Info) {
-    const filepath = path.join(Instance.directory, "config.json")
-    const existing = await loadFile(filepath)
-    await Bun.write(filepath, JSON.stringify(mergeDeep(existing, config), null, 2))
+    const filepath = await projectConfigFile()
+    await fs.mkdir(path.dirname(filepath), { recursive: true })
+
+    const before = await Bun.file(filepath)
+      .text()
+      .catch((err) => {
+        if (err.code === "ENOENT") return "{}"
+        throw new JsonError({ path: filepath }, { cause: err })
+      })
+
+    if (!filepath.endsWith(".jsonc")) {
+      const existing = parseConfig(before, filepath)
+      await Bun.write(filepath, JSON.stringify(mergeDeep(existing, config), null, 2))
+    } else {
+      const next = patchJsonc(before, config)
+      parseConfig(next, filepath)
+      await Bun.write(filepath, next)
+    }
     await Instance.dispose()
   }
 

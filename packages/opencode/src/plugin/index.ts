@@ -27,6 +27,7 @@ export namespace Plugin {
       fetch: async (...args) => Server.App().fetch(...args),
     })
     const config = await Config.get()
+    const disabled = new Set((config.disabled_plugins ?? []).map(Config.getPluginName))
     const hooks: Hooks[] = []
     const input: PluginInput = {
       client,
@@ -49,6 +50,11 @@ export namespace Plugin {
     }
 
     for (let plugin of plugins) {
+      const pluginName = Config.getPluginName(plugin)
+      if (disabled.has(pluginName)) {
+        log.info("skipping disabled plugin", { name: pluginName })
+        continue
+      }
       // ignore old codex plugin since it is supported first party now
       if (plugin.includes("opencode-openai-codex-auth") || plugin.includes("opencode-copilot-auth")) continue
       log.info("loading plugin", { path: plugin })

@@ -547,6 +547,21 @@ Place plugin files in `.opencode/plugins/` or `~/.config/opencode/plugins/`. You
 
 ---
 
+### Disabled plugins
+
+Disable plugins without removing them from your config or plugin directories.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "disabled_plugins": ["opencode-helicone-session", "@my-org/custom-plugin", "my-plugin"]
+}
+```
+
+Use canonical names (no version/path). For `file://` plugins, use the filename without extension. If you set `disabled_plugins` in a higher-precedence config, it overrides lower-precedence disabled lists.
+
+---
+
 ### Instructions
 
 You can configure the instructions for the model you're using through the `instructions` option.
